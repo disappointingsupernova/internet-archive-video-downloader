@@ -504,6 +504,8 @@ while IFS= read -r -d '' URL &&
         ((FAILED+=1))
     fi
 
+    sleep $(( RANDOM % 4 + 2 ))
+
 done < "$TMP_DIR/manifest.bin"
 
 echo
