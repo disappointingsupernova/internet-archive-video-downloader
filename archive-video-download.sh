@@ -267,20 +267,33 @@ for entry in metadata.get("files", []):
 
 print(f"[INFO] Video files found: {len(files)}", file=sys.stderr)
 
-# Always build groups so we can report multi-format videos.
-groups = defaultdict(list)
-for entry in files:
-    groups[identity(entry["name"])].append(entry)
-
 # Drop .ia.* derivatives only when a non-.ia variant exists for that video.
-filtered = []
-for group in groups.values():
-    non_ia = [e for e in group if not PurePosixPath(e["name"]).stem.endswith(".ia")]
-    filtered.extend(non_ia if non_ia else group)
+# Compare by directory + normalised stem (ignoring the .ia suffix itself).
+ia_stems = set()
+for entry in files:
+    p = PurePosixPath(entry["name"])
+    if p.stem.endswith(".ia"):
+        # The real stem is everything before the trailing .ia
+        ia_stems.add((str(p.parent).casefold(), p.stem[:-3].casefold()))
 
-files = filtered
+non_ia_stems = set()
+for entry in files:
+    p = PurePosixPath(entry["name"])
+    if not p.stem.endswith(".ia"):
+        non_ia_stems.add((str(p.parent).casefold(), p.stem.casefold()))
 
-# Rebuild groups from the filtered list for one_per_video and multi count.
+files = [
+    e for e in files
+    if not (
+        PurePosixPath(e["name"]).stem.endswith(".ia")
+        and (
+            str(PurePosixPath(e["name"]).parent).casefold(),
+            PurePosixPath(e["name"]).stem[:-3].casefold()
+        ) in non_ia_stems
+    )
+]
+
+# Build groups from the filtered list for one_per_video selection and multi count.
 groups = defaultdict(list)
 for entry in files:
     groups[identity(entry["name"])].append(entry)
