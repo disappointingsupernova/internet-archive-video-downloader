@@ -141,16 +141,7 @@ curl -fLsS \
     "https://archive.org/metadata/$ENCODED_ID" \
     -o "$TMP_DIR/metadata.json"
 
-# Generate download manifest
-python3 - \
-    "$TMP_DIR/metadata.json" \
-    "$ENCODED_ID" \
-    "$OUTPUT_DIR" \
-    "$ONE_PER_VIDEO" \
-    "$SKIP_EXISTING_VARIANT" \
-    "$PREFER" \
-    > "$TMP_DIR/manifest.bin" <<'PY'
-
+cat > "$TMP_DIR/manifest.py" <<'PY'
 import json
 import sys
 import os
@@ -165,7 +156,8 @@ from collections import defaultdict
     output_dir,
     one_per_video,
     skip_existing,
-    preferred
+    preferred,
+    multi_count_file
 ) = sys.argv[1:]
 
 one_per_video = one_per_video == "1"
@@ -275,13 +267,18 @@ for entry in metadata.get("files", []):
 
 print(f"[INFO] Video files found: {len(files)}", file=sys.stderr)
 
+# Always build groups so we can report multi-format videos.
+groups = defaultdict(list)
+for entry in files:
+    groups[identity(entry["name"])].append(entry)
+
+multi_groups = sum(1 for g in groups.values() if len(g) > 1)
+
+with open(multi_count_file, "w") as fh:
+    fh.write(str(multi_groups))
+
 # Pick only one file from each matching group.
 if one_per_video:
-    groups = defaultdict(list)
-
-    for entry in files:
-        groups[identity(entry["name"])].append(entry)
-
     selected = [
         min(group, key=preference)
         for group in groups.values()
@@ -372,6 +369,38 @@ print(
     file=sys.stderr
 )
 PY
+
+build_manifest() {
+    python3 "$TMP_DIR/manifest.py" \
+        "$TMP_DIR/metadata.json" \
+        "$ENCODED_ID" \
+        "$OUTPUT_DIR" \
+        "$ONE_PER_VIDEO" \
+        "$SKIP_EXISTING_VARIANT" \
+        "$PREFER" \
+        "$TMP_DIR/multi_count" \
+        > "$TMP_DIR/manifest.bin"
+}
+
+build_manifest
+
+# If --one-per-video wasn't set and multiple formats exist, prompt.
+if [[ "$ONE_PER_VIDEO" -eq 0 && -f "$TMP_DIR/multi_count" ]]; then
+    MULTI_COUNT="$(cat "$TMP_DIR/multi_count")"
+
+    if [[ "$MULTI_COUNT" =~ ^[0-9]+$ && "$MULTI_COUNT" -gt 0 ]]; then
+        echo
+        echo "[INFO] $MULTI_COUNT video(s) have multiple formats available."
+        printf "       Enable --one-per-video to download only the preferred format? [y/N] "
+        read -r REPLY </dev/tty
+
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            ONE_PER_VIDEO=1
+            echo "[INFO] One-per-video enabled (preference: $PREFER)"
+            build_manifest
+        fi
+    fi
+fi
 
 TOTAL=0
 SUCCESS=0
