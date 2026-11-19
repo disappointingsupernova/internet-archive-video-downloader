@@ -257,12 +257,16 @@ for entry in metadata.get("files", []):
     ):
         continue
 
-    extension = PurePosixPath(name).suffix.lower()
+    path = PurePosixPath(name)
+    extension = path.suffix.lower()
 
     if extension not in extensions:
         continue
 
-    # .ia, XML, torrent, metadata etc. are excluded.
+    # Exclude Internet Archive internal re-encodes (e.g. foo.ia.mp4)
+    if path.stem.endswith(".ia"):
+        continue
+
     files.append(entry)
 
 print(f"[INFO] Video files found: {len(files)}", file=sys.stderr)
