@@ -263,15 +263,24 @@ for entry in metadata.get("files", []):
     if extension not in extensions:
         continue
 
-    # Exclude Internet Archive internal re-encodes (e.g. foo.ia.mp4)
-    if path.stem.endswith(".ia"):
-        continue
-
     files.append(entry)
 
 print(f"[INFO] Video files found: {len(files)}", file=sys.stderr)
 
 # Always build groups so we can report multi-format videos.
+groups = defaultdict(list)
+for entry in files:
+    groups[identity(entry["name"])].append(entry)
+
+# Drop .ia.* derivatives only when a non-.ia variant exists for that video.
+filtered = []
+for group in groups.values():
+    non_ia = [e for e in group if not PurePosixPath(e["name"]).stem.endswith(".ia")]
+    filtered.extend(non_ia if non_ia else group)
+
+files = filtered
+
+# Rebuild groups from the filtered list for one_per_video and multi count.
 groups = defaultdict(list)
 for entry in files:
     groups[identity(entry["name"])].append(entry)
