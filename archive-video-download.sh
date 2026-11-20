@@ -467,10 +467,10 @@ if [[ "$ONE_PER_VIDEO" -eq 0 && -f "$TMP_DIR/multi_count" ]]; then
     if [[ "$MULTI_COUNT" =~ ^[0-9]+$ && "$MULTI_COUNT" -gt 0 ]]; then
         echo
         echo "[INFO] $MULTI_COUNT video(s) have multiple formats available."
-        printf "       Enable --one-per-video to download only the preferred format? [y/N] "
+        printf "       Enable --one-per-video to download only the preferred format? [Y/n] "
         read -r REPLY </dev/tty
 
-        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        if [[ ! "$REPLY" =~ ^[Nn]$ ]]; then
             ONE_PER_VIDEO=1
             echo "[INFO] One-per-video enabled (preference: $PREFER)"
             build_manifest
