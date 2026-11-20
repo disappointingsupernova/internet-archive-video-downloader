@@ -390,11 +390,14 @@ for entry in selected:
         + quote(name, safe="/")
     )
 
+    # Strip subdir prefix from local path so files land directly in output_dir.
+    local_name = name[len(subdir):].lstrip("/") if subdir else name
+
     size = str(entry.get("size", ""))
     md5  = str(entry.get("md5",  ""))
     sha1 = str(entry.get("sha1", ""))
 
-    for value in (url, name, size, md5, sha1):
+    for value in (url, local_name, size, md5, sha1):
         sys.stdout.buffer.write(
             value.encode("utf-8") + b"\0"
         )
