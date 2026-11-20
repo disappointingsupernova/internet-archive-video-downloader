@@ -67,6 +67,7 @@ archive-video-download.sh [OPTIONS] URL OUTPUT_DIR
 | `--one-per-video` | Select only one format per video, using the preference order |
 | `--prefer EXT,EXT,...` | Comma-separated list of preferred extensions, in priority order |
 | `--exclude DIR`, `-e DIR` | Exclude files under a named directory; can be specified multiple times |
+| `--exclude-match STR`, `-m STR` | Exclude files whose filename contains STR (case-insensitive); can be specified multiple times |
 | `--skip-existing-variant` | Skip a video if any local file with the same base name already exists, regardless of format |
 | `-h`, `--help` | Show usage information |
 

@@ -6,6 +6,7 @@ ONE_PER_VIDEO=0
 SKIP_EXISTING_VARIANT=0
 PREFER="mp4,mkv,m4v,webm,mov,avi,mpeg,mpg,wmv,flv,ts,ogv,3gp"
 EXCLUDE=()
+EXCLUDE_MATCH=()
 
 usage() {
     cat <<'EOF'
@@ -16,6 +17,7 @@ Options:
   --one-per-video           Select one format per video
   --prefer EXT,EXT          Preferred formats, in order
   --exclude DIR, -e DIR     Exclude a directory (repeatable)
+  --exclude-match STR, -m   Exclude files whose name contains STR (repeatable)
   --skip-existing-variant   Don't download if another local
                             video format already exists
   -h, --help                Show this help
@@ -48,6 +50,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             }
             EXCLUDE+=("$2")
+            shift 2
+            ;;
+        --exclude-match|-m)
+            [[ $# -ge 2 ]] || {
+                echo "ERROR: --exclude-match requires a value" >&2
+                exit 1
+            }
+            EXCLUDE_MATCH+=("$2")
             shift 2
             ;;
         --prefer)
@@ -148,6 +158,7 @@ echo "One per video: $ONE_PER_VIDEO"
 echo "Skip variants: $SKIP_EXISTING_VARIANT"
 echo "Preferences:   $PREFER"
 echo "Excluded dirs: ${EXCLUDE[*]:-(none)}"
+echo "Excl. matches: ${EXCLUDE_MATCH[*]:-(none)}"
 echo
 
 echo "[INFO] Fetching metadata..."
@@ -167,6 +178,12 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 from collections import defaultdict
 
+args = sys.argv[1:]
+split = args.index("--match") if "--match" in args else len(args)
+fixed_args = args[:8]
+exclude_dirs  = args[8:split]
+exclude_match = args[split+1:]
+
 (
     metadata_file,
     identifier,
@@ -175,14 +192,14 @@ from collections import defaultdict
     skip_existing,
     preferred,
     multi_count_file,
-    subdir,
-    *exclude_dirs
-) = sys.argv[1:]
+    subdir
+) = fixed_args
 
 one_per_video = one_per_video == "1"
 skip_existing = skip_existing == "1"
 subdir = subdir.strip("/")
-exclude_dirs = [d.strip("/").casefold() for d in exclude_dirs if d.strip()]
+exclude_dirs  = [d.strip("/").casefold() for d in exclude_dirs  if d.strip()]
+exclude_match = [m.casefold()            for m in exclude_match if m.strip()]
 
 extensions = {
     ".mp4", ".mkv", ".avi", ".mov",
@@ -293,6 +310,11 @@ for entry in metadata.get("files", []):
         name_parts = [p.casefold() for p in name.split("/")[:-1]]
         if any(ex in name_parts for ex in exclude_dirs):
             continue
+
+    # Exclude any file whose filename contains an excluded string.
+    filename = PurePosixPath(name).name.casefold()
+    if any(m in filename for m in exclude_match):
+        continue
 
     files.append(entry)
 
@@ -441,6 +463,8 @@ build_manifest() {
         "$TMP_DIR/multi_count" \
         "$SUBDIR" \
         "${EXCLUDE[@]:-}" \
+        "--match" \
+        "${EXCLUDE_MATCH[@]:-}" \
         > "$TMP_DIR/manifest.bin"
 }
 
