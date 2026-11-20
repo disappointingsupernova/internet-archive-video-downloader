@@ -5,6 +5,7 @@ set -Eeuo pipefail
 ONE_PER_VIDEO=0
 SKIP_EXISTING_VARIANT=0
 PREFER="mp4,mkv,m4v,webm,mov,avi,mpeg,mpg,wmv,flv,ts,ogv,3gp"
+EXCLUDE=()
 
 usage() {
     cat <<'EOF'
@@ -14,6 +15,7 @@ Usage:
 Options:
   --one-per-video           Select one format per video
   --prefer EXT,EXT          Preferred formats, in order
+  --exclude DIR, -e DIR     Exclude a directory (repeatable)
   --skip-existing-variant   Don't download if another local
                             video format already exists
   -h, --help                Show this help
@@ -39,6 +41,14 @@ while [[ $# -gt 0 ]]; do
         --skip-existing-variant)
             SKIP_EXISTING_VARIANT=1
             shift
+            ;;
+        --exclude|-e)
+            [[ $# -ge 2 ]] || {
+                echo "ERROR: --exclude requires a value" >&2
+                exit 1
+            }
+            EXCLUDE+=("$2")
+            shift 2
             ;;
         --prefer)
             [[ $# -ge 2 ]] || {
@@ -137,6 +147,7 @@ echo "Output:        $OUTPUT_DIR"
 echo "One per video: $ONE_PER_VIDEO"
 echo "Skip variants: $SKIP_EXISTING_VARIANT"
 echo "Preferences:   $PREFER"
+echo "Excluded dirs: ${EXCLUDE[*]:-(none)}"
 echo
 
 echo "[INFO] Fetching metadata..."
@@ -164,12 +175,14 @@ from collections import defaultdict
     skip_existing,
     preferred,
     multi_count_file,
-    subdir
+    subdir,
+    *exclude_dirs
 ) = sys.argv[1:]
 
 one_per_video = one_per_video == "1"
 skip_existing = skip_existing == "1"
 subdir = subdir.strip("/")
+exclude_dirs = [d.strip("/").casefold() for d in exclude_dirs if d.strip()]
 
 extensions = {
     ".mp4", ".mkv", ".avi", ".mov",
@@ -274,6 +287,12 @@ for entry in metadata.get("files", []):
     # If a subdirectory was specified, only include files under it.
     if subdir and not name.startswith(subdir + "/"):
         continue
+
+    # Exclude any file whose path contains an excluded directory component.
+    if exclude_dirs:
+        name_parts = [p.casefold() for p in name.split("/")[:-1]]
+        if any(ex in name_parts for ex in exclude_dirs):
+            continue
 
     files.append(entry)
 
@@ -421,6 +440,7 @@ build_manifest() {
         "$PREFER" \
         "$TMP_DIR/multi_count" \
         "$SUBDIR" \
+        "${EXCLUDE[@]:-}" \
         > "$TMP_DIR/manifest.bin"
 }
 
