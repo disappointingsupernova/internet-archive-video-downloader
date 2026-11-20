@@ -84,12 +84,13 @@ OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-# Parse and validate identifier
-IDENTIFIER="$(python3 - "$ARCHIVE_URL" <<'PY'
+# Parse and validate identifier, and extract optional subdirectory prefix
+read -r IDENTIFIER SUBDIR < <(python3 - "$ARCHIVE_URL" <<'PY'
 import sys
 from urllib.parse import urlparse, unquote
 
 value = sys.argv[1].strip()
+subdir = ""
 
 if "://" not in value:
     ident = value
@@ -109,12 +110,16 @@ else:
 
     ident = unquote(parts[1])
 
+    # Anything after the identifier is a subdirectory prefix
+    if len(parts) > 2:
+        subdir = "/".join(unquote(p) for p in parts[2:]).strip("/")
+
 if not ident or "/" in ident or ident in (".", ".."):
     sys.exit("Invalid identifier")
 
-print(ident)
+print(ident, subdir)
 PY
-)"
+)
 
 ENCODED_ID="$(python3 - "$IDENTIFIER" <<'PY'
 import sys
@@ -127,6 +132,7 @@ echo "======================================"
 echo " Internet Archive Video Downloader"
 echo "======================================"
 echo "Item:          $IDENTIFIER"
+echo "Subdirectory:  ${SUBDIR:-(none)}"
 echo "Output:        $OUTPUT_DIR"
 echo "One per video: $ONE_PER_VIDEO"
 echo "Skip variants: $SKIP_EXISTING_VARIANT"
@@ -157,11 +163,13 @@ from collections import defaultdict
     one_per_video,
     skip_existing,
     preferred,
-    multi_count_file
+    multi_count_file,
+    subdir
 ) = sys.argv[1:]
 
 one_per_video = one_per_video == "1"
 skip_existing = skip_existing == "1"
+subdir = subdir.strip("/")
 
 extensions = {
     ".mp4", ".mkv", ".avi", ".mov",
@@ -261,6 +269,10 @@ for entry in metadata.get("files", []):
     extension = path.suffix.lower()
 
     if extension not in extensions:
+        continue
+
+    # If a subdirectory was specified, only include files under it.
+    if subdir and not name.startswith(subdir + "/"):
         continue
 
     files.append(entry)
@@ -405,6 +417,7 @@ build_manifest() {
         "$SKIP_EXISTING_VARIANT" \
         "$PREFER" \
         "$TMP_DIR/multi_count" \
+        "$SUBDIR" \
         > "$TMP_DIR/manifest.bin"
 }
 
