@@ -430,29 +430,25 @@ fi
 
 TOTAL=0
 SUCCESS=0
-FAILED=0
+FAILED_FIRST=0
+RETRIED_OK=0
+FAILED_FINAL=0
 SKIPPED=0
 
-while IFS= read -r -d '' URL &&
-      IFS= read -r -d '' NAME &&
-      IFS= read -r -d '' SIZE &&
-      IFS= read -r -d '' MD5 &&
-      IFS= read -r -d '' SHA1; do
+: > "$TMP_DIR/retry.bin"
 
-    ((TOTAL+=1))
-
-    DEST="$OUTPUT_DIR/$NAME"
+download_file() {
+    local URL="$1" NAME="$2" SIZE="$3" MD5="$4" SHA1="$5"
+    local DEST="$OUTPUT_DIR/$NAME"
     mkdir -p "$(dirname "$DEST")"
 
-    echo
-    echo "[$TOTAL] $NAME"
-
-    # Skip a complete, verified file of the same name.
+    # Skip a complete, verified file.
     if [[ -f "$DEST" && "$SIZE" =~ ^[0-9]+$ ]]; then
+        local LOCAL_SIZE
         LOCAL_SIZE="$(stat -c %s "$DEST")"
 
         if [[ "$LOCAL_SIZE" -eq "$SIZE" ]]; then
-            VERIFIED=0
+            local VERIFIED=0
 
             if [[ -n "$SHA1" ]] && command -v sha1sum >/dev/null 2>&1; then
                 echo "$SHA1  $DEST" | sha1sum -c --status && VERIFIED=1
@@ -464,8 +460,7 @@ while IFS= read -r -d '' URL &&
 
             if [[ "$VERIFIED" -eq 1 ]]; then
                 echo "[SKIP] Already downloaded (verified)"
-                ((SKIPPED+=1))
-                continue
+                return 2
             else
                 echo "[INFO] Checksum mismatch, re-downloading"
             fi
@@ -481,7 +476,7 @@ while IFS= read -r -d '' URL &&
         --output-document="$DEST" \
         "$URL"; then
 
-        PASS=1
+        local PASS=1
 
         if [[ "$SIZE" =~ ^[0-9]+$ ]] &&
            [[ "$(stat -c %s "$DEST")" -ne "$SIZE" ]]; then
@@ -493,20 +488,72 @@ while IFS= read -r -d '' URL &&
             echo "$MD5  $DEST" | md5sum -c --status || { echo "[ERROR] MD5 mismatch"; PASS=0; }
         fi
 
-        if [[ "$PASS" -eq 1 ]]; then
-            echo "[OK] Downloaded"
-            ((SUCCESS+=1))
-        else
-            ((FAILED+=1))
-        fi
+        [[ "$PASS" -eq 1 ]] && return 0 || return 1
     else
         echo "[ERROR] Download failed"
-        ((FAILED+=1))
+        return 1
+    fi
+}
+
+while IFS= read -r -d '' URL &&
+      IFS= read -r -d '' NAME &&
+      IFS= read -r -d '' SIZE &&
+      IFS= read -r -d '' MD5 &&
+      IFS= read -r -d '' SHA1; do
+
+    ((TOTAL+=1))
+    echo
+    echo "[$TOTAL] $NAME"
+
+    download_file "$URL" "$NAME" "$SIZE" "$MD5" "$SHA1"
+    RC=$?
+
+    if [[ $RC -eq 0 ]]; then
+        ((SUCCESS+=1))
+    elif [[ $RC -eq 2 ]]; then
+        ((SKIPPED+=1))
+    else
+        ((FAILED_FIRST+=1))
+        # Save to retry manifest
+        for value in "$URL" "$NAME" "$SIZE" "$MD5" "$SHA1"; do
+            printf '%s\0' "$value"
+        done >> "$TMP_DIR/retry.bin"
     fi
 
     sleep $(( RANDOM % 4 + 2 ))
 
 done < "$TMP_DIR/manifest.bin"
+
+# Retry pass
+if [[ "$FAILED_FIRST" -gt 0 ]]; then
+    echo
+    echo "======================================"
+    echo " Retrying $FAILED_FIRST failed file(s)"
+    echo "======================================"
+    sleep 10
+
+    while IFS= read -r -d '' URL &&
+          IFS= read -r -d '' NAME &&
+          IFS= read -r -d '' SIZE &&
+          IFS= read -r -d '' MD5 &&
+          IFS= read -r -d '' SHA1; do
+
+        echo
+        echo "[RETRY] $NAME"
+
+        download_file "$URL" "$NAME" "$SIZE" "$MD5" "$SHA1"
+        RC=$?
+
+        if [[ $RC -eq 0 || $RC -eq 2 ]]; then
+            ((RETRIED_OK+=1))
+        else
+            ((FAILED_FINAL+=1))
+        fi
+
+        sleep $(( RANDOM % 4 + 2 ))
+
+    done < "$TMP_DIR/retry.bin"
+fi
 
 echo
 echo "======================================"
@@ -515,7 +562,9 @@ echo "======================================"
 echo "Queued:             $TOTAL"
 echo "Downloaded:         $SUCCESS"
 echo "Already complete:   $SKIPPED"
-echo "Failed:             $FAILED"
+echo "Failed (first pass):$FAILED_FIRST"
+echo "Retried OK:         $RETRIED_OK"
+echo "Failed (final):     $FAILED_FINAL"
 echo "Location:           $OUTPUT_DIR"
 
-[[ "$FAILED" -eq 0 ]]
+[[ "$FAILED_FINAL" -eq 0 ]]
