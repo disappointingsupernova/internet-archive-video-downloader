@@ -1,19 +1,24 @@
 # Internet Archive Video Downloader
 
-A Bash script for downloading video files from [Internet Archive](https://archive.org) items. It fetches the item's metadata via the Archive.org API, filters to video files only, verifies downloads using checksums provided by the API, and skips files that have already been downloaded successfully — making it safe to re-run after an interrupted download.
+A Bash script for bulk-downloading video files from [Internet Archive](https://archive.org) items. It fetches item metadata via the Archive.org API, filters to video files only, verifies downloads using checksums, skips files already downloaded successfully, and retries any failures automatically — making it safe to re-run after an interrupted session.
 
 ## Features
 
 - Downloads all video files from any Internet Archive item
 - Preserves the item's directory structure (e.g. `Season 1/`, `Season 2/`)
-- Skips non-video files entirely (subtitles, XML, torrents, artwork, etc.)
+- Skips non-video files entirely — subtitles, XML, torrents, artwork, `.ia.*` re-encodes, etc.
+- Filters out Internet Archive's internal `.ia.*` derivative files (e.g. `episode.ia.mp4`) when an original version exists; falls back to the `.ia.*` file if it is the only version available
 - Verifies completed downloads using SHA1 or MD5 checksums from the Archive.org metadata API
 - Skips files that are already present and verified — re-running is always safe
-- Re-downloads files that are present but fail checksum verification (e.g. from a previous interrupted download)
+- Re-downloads files that fail checksum verification (e.g. from a previous interrupted download)
 - Resumes partial downloads using `wget --continue`
+- Automatically retries failed files after the main pass completes, with a 10-second pause between passes
+- Reports first-pass failures, successful retries, and final failures separately
+- Prompts interactively if multiple formats are detected for the same video and `--one-per-video` was not specified
 - Optionally selects only one format per video when multiple encodes exist
 - Optionally skips a video entirely if any local variant of it already exists
 - Configurable format preference order
+- Adds a random 2–5 second delay between each file to avoid hammering Archive.org's servers
 
 ## Requirements
 
@@ -25,7 +30,7 @@ A Bash script for downloading video files from [Internet Archive](https://archiv
 | `wget` | Downloading files with resume support |
 | `sha1sum` / `md5sum` | Checksum verification (optional but recommended) |
 
-On most Linux distributions these are available by default or via your package manager. On macOS, `wget` and GNU `coreutils` (for `sha1sum`/`md5sum`) can be installed via [Homebrew](https://brew.sh):
+On most Linux distributions these are available by default or via your package manager. On macOS, `wget` and GNU `coreutils` (for `sha1sum` / `md5sum`) can be installed via [Homebrew](https://brew.sh):
 
 ```bash
 brew install wget coreutils
@@ -78,7 +83,7 @@ Download everything from an item:
 
 ```bash
 ./archive-video-download.sh \
-    "https://archive.org/details/some-item-identifier" \
+    "https://archive.org/details/example-item-identifier" \
     "/mnt/media/archive"
 ```
 
@@ -88,7 +93,7 @@ Download one file per video, preferring MP4 then MKV:
 ./archive-video-download.sh \
     --one-per-video \
     --prefer mp4,mkv \
-    "https://archive.org/details/some-item-identifier" \
+    "https://archive.org/details/example-item-identifier" \
     "/mnt/media/archive"
 ```
 
@@ -99,28 +104,36 @@ Skip videos where you already have any local format:
     --one-per-video \
     --prefer mp4,mkv \
     --skip-existing-variant \
-    "https://archive.org/details/some-item-identifier" \
+    "https://archive.org/details/example-item-identifier" \
     "/mnt/media/archive"
 ```
 
 Use a bare identifier instead of a full URL:
 
 ```bash
-./archive-video-download.sh some-item-identifier /mnt/media/archive
+./archive-video-download.sh example-item-identifier /mnt/media/archive
 ```
 
 ## How it works
 
-1. The Archive.org item identifier is extracted and validated from the provided URL
+1. The Archive.org item identifier is extracted and validated from the provided URL or bare identifier
 2. The item's metadata JSON is fetched from `https://archive.org/metadata/<identifier>`
-3. A Python script parses the metadata, filters to video files only, and builds a null-delimited download manifest containing the URL, relative path, file size, MD5, and SHA1 for each file
-4. The Bash download loop processes each entry:
-   - If the destination file already exists and its size matches, the SHA1 (or MD5) checksum is verified against the value from the metadata. If it passes, the file is skipped. If it fails, the file is re-downloaded
+3. A Python script parses the metadata and builds a null-delimited download manifest:
+   - Non-video files are excluded (subtitles, XML, torrents, images, etc.)
+   - `.ia.*` derivative files (Archive.org internal re-encodes) are excluded when an original version of the same video exists; kept if they are the only available version
+   - If `--one-per-video` is set, only the highest-priority format for each video is selected
+   - If `--one-per-video` is not set but multiple formats are detected, the script prompts interactively
+   - Each manifest entry contains: URL, relative path, file size, MD5, and SHA1
+4. The main download loop processes each entry:
+   - If the file already exists and its size matches, the SHA1 (or MD5) checksum is verified. If it passes, the file is skipped. If it fails, the file is re-downloaded
    - Downloads use `wget --continue` so interrupted transfers resume rather than restart
-   - After each download, the size and checksum are verified. A mismatch is recorded as a failure
-5. A summary is printed at the end. The script exits with a non-zero status if any file failed
+   - After each download, size and checksum are verified
+   - A random 2–5 second delay is applied between each file
+5. Any files that failed the main pass are collected and retried automatically after a 10-second pause
+6. A summary is printed showing first-pass failures, successful retries, and any remaining failures
+7. The script exits with a non-zero status if any file failed both passes
 
-## Directory structure
+## Output and directory structure
 
 The script preserves whatever directory structure the Archive.org item uses. For example, an item organised as:
 
@@ -141,13 +154,68 @@ OUTPUT_DIR/
     episode-01.mp4
 ```
 
+## Example output
+
+```
+======================================
+ Internet Archive Video Downloader
+======================================
+Item:          example-item-identifier
+Output:        /mnt/media/archive
+One per video: 1
+Skip variants: 0
+Preferences:   mp4,mkv,m4v,webm,...
+
+[INFO] Fetching metadata...
+[INFO] Video files found: 52
+[INFO] Selected video files: 26
+
+[1] Season 1/episode-01.mp4
+[OK] Downloaded
+
+[2] Season 1/episode-02.mp4
+[SKIP] Already downloaded (verified)
+
+...
+
+======================================
+ Retrying 2 failed file(s)
+======================================
+
+[RETRY] Season 2/episode-05.mp4
+[OK] Downloaded
+
+======================================
+ Download summary
+======================================
+Queued:             26
+Downloaded:         24
+Already complete:   1
+Failed (first pass):2
+Retried OK:         1
+Failed (final):     1
+Location:           /mnt/media/archive
+```
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | All queued files downloaded and verified successfully |
-| `1` | One or more files failed to download or failed verification |
+| `0` | All files downloaded and verified successfully (including retries) |
+| `1` | One or more files failed both the main pass and the retry pass |
+
+## Notes on Archive.org etiquette
+
+The Internet Archive is a non-profit that relies on donations. Please be considerate:
+
+- This script adds a random 2–5 second delay between each file automatically
+- Avoid running multiple instances against the same item simultaneously
+- Consider scheduling large downloads during off-peak hours
+
+## Contributing
+
+Bug reports and pull requests are welcome. There are no formal contribution guidelines — just keep changes focused and test against a real Archive.org item before submitting.
 
 ## Licence
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
