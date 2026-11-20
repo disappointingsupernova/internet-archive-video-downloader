@@ -114,9 +114,29 @@ Use a bare identifier instead of a full URL:
 ./archive-video-download.sh example-item-identifier /mnt/media/archive
 ```
 
+## Subdirectory filtering
+
+Some Archive.org items organise their files into subdirectories. If you pass a URL that includes a path below the item identifier, the script will detect it and prompt you:
+
+```
+[INFO] URL contains subdirectory: Season 1
+       Download this subdirectory only? [Y/n]
+```
+
+- Press Enter or `y` to download only files under that subdirectory
+- Press `n` to download the entire item regardless
+
+For example, this URL:
+
+```
+https://archive.org/download/example-item/Season%201/
+```
+
+will detect `Season 1` as the subdirectory and offer to filter to it. If you accept, only files whose path begins with `Season 1/` will be queued.
+
 ## How it works
 
-1. The Archive.org item identifier is extracted and validated from the provided URL or bare identifier
+1. The Archive.org item identifier is extracted and validated from the provided URL or bare identifier. If the URL includes a path below the identifier, that subdirectory is detected and the user is prompted to confirm whether to filter to it or download the whole item
 2. The item's metadata JSON is fetched from `https://archive.org/metadata/<identifier>`
 3. A Python script parses the metadata and builds a null-delimited download manifest:
    - Non-video files are excluded (subtitles, XML, torrents, images, etc.)

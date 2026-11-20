@@ -423,6 +423,20 @@ build_manifest() {
 
 build_manifest
 
+# If a subdirectory was detected, ask whether to use it or download the whole item.
+if [[ -n "$SUBDIR" ]]; then
+    echo
+    echo "[INFO] URL contains subdirectory: $SUBDIR"
+    printf "       Download this subdirectory only? [Y/n] "
+    read -r REPLY </dev/tty
+
+    if [[ "$REPLY" =~ ^[Nn]$ ]]; then
+        SUBDIR=""
+        echo "[INFO] Downloading entire item"
+        build_manifest
+    fi
+fi
+
 # If --one-per-video wasn't set and multiple formats exist, prompt.
 if [[ "$ONE_PER_VIDEO" -eq 0 && -f "$TMP_DIR/multi_count" ]]; then
     MULTI_COUNT="$(cat "$TMP_DIR/multi_count")"
